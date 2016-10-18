@@ -39,7 +39,7 @@
 //https://github.com/easylogging/easyloggingpp/blob/master/README.md
 #define ELPP_DEBUG_ASSERT_FAILURE	//ÅäÖÃÎÄ¼ş¶ÁÈ¡Ê§°ÜÖÕÖ¹Æô¶¯
 #define ELPP_STACKTRACE_ON_CRASH		//¿ÉÒÔÅ²µ½makefileÖĞÈ¥
-#define MAX_LINE    8192	//Ò»´Î¶ÁÈ¡µÄ»º³åÇøÏûÏ¢   
+#define MAX_LINE    10240	//Ò»´Î¶ÁÈ¡µÄ»º³åÇøÏûÏ¢   
 
 #include "easylogging++.h"
 INITIALIZE_EASYLOGGINGPP	
@@ -53,6 +53,7 @@ typedef struct peer_info{
 	struct bufferevent *bev;
 	char stod[128];
 	char dtos[128];
+	uint32_t updatetime;
 	struct event timer;
 }peer_info_t;
 //µ¥ÏòÁ¬½ÓĞÅÏ¢Ó³Éä±í
@@ -204,25 +205,22 @@ void agent_read_cb(struct bufferevent *bev, void *arg)
 {	
 	//½Úµã¶ÔÏó
 	peer_info_t *peerobj = (peer_info_t *)arg;
-	//×°ÔØÏûÏ¢ÄÚÈİ
-	char content[MAX_LINE+1] = {0,};    
-	int n,len;    
 	//¶ÁÈ¡ÏûÏ¢
-	while (n = bufferevent_read(bev, content, MAX_LINE),n > 0)
-	{ 
-		LOG(DEBUG)<<"content "<<content<<"n ="<<n;
-		content[n] = '\0'; 
-		len = n;
-	}
-	//¼ì²éÊÇ·ñÊÇÁ¬½ÓÇëÇó
-	if(strcmp(content+len-4,"XXEE") == 0)
+	if(evbuffer_find(bev->input,(u_char*)"XXEE",4) != NULL)
 	{
+		int n,len;
+		char content[MAX_LINE+1] = {0,};
+		while (n = bufferevent_read(bev, content, MAX_LINE),n > 0)
+		{ 
+			LOG(DEBUG)<<"content "<<content<<"n ="<<n;
+			content[n] = '\0'; 
+			len = n;
+		}
 		content[len-4] = '\0';
 		Json::Reader 	reader;
 		Json::Value 	requestValue;
 		if(reader.parse(content, requestValue) == false)
 		{
-			LOG(INFO)<<"#########request is bad,to return";
 			char temp[64] = "{\"ErrorNum\": \"400\"}XXEE";    
 			int length = strlen(temp); 
 			bufferevent_write(bev,temp,length);
@@ -260,35 +258,6 @@ void agent_read_cb(struct bufferevent *bev, void *arg)
 				peerobj = NULL;
 				return ;
 			}
-			/*
-			else if(mappeer->bev != peerobj->bev) //Í¬Ò»¸öÉè±¸Í¬Ò»¸ö»á»°id,ÓĞÁ½ÌõÁ¬½Ó£¬ÔòÉ¾³
-			{
-				LOG(INFO)<<"different connect use the same id"<<SrcToDes.c_str();
-				//¶Ï¿ªÀÏÁ¬½Ó
-				bufferevent_free(mappeer->bev);
-				//É¾³ıÀÏÁ¬½ÓµÄ¶¨Ê±Æ÷
-				if(event_initialized(&mappeer->timer))		
-					event_del(&mappeer->timer);
-				//ĞŞ¸Ä»á»°ÔÚpeer mapÖĞ¶ÔÓ¦µÄ¶ÔÏó
-				s_peer_map[SrcToDes] = peerobj;
-				
-				//É¾³ıÀÏÁ¬½ÓÔÚµØÖ·±íÖĞµÄÓ³Éä¹ØÏµ
-				erase_address_obj(mappeer->bev);
-				peer_info_t *destpeer = get_peer_obj(DesToSrc.c_str()); //¼ì²é¶Ô¶ËÁ¬½ÓÊÇ·ñ´æÔÚ
-				if(destpeer != NULL)		//Èç¹û´æÔÚĞŞ¸ÄÕû¸ö»á»°µÄÓ³Éä
-				{
-					erase_address_obj(mappeer->bev);		//É¾³ısrc_dest µÄÓ³Éä¹ØÏµ
-					s_address_map[destpeer->bev] = bev;				//ĞŞ¸Ädest_src µÄÓ³Éä¹ØÏµ
-					insert_address_obj(bev,destpeer->bev);	//Ìí¼ÓĞÂµÄÓ³Éä¹ØÏµ
-				}
-				//ÊÍ·ÅµôÀÏÁ¬½ÓµÄ½Úµã
-				LOG(INFO)<<"to free the old one"<<SrcToDes.c_str();
-				free(mappeer);
-				strncpy(peerobj->stod,SrcToDes.c_str(),sizeof(peerobj->stod));
-				strncpy(peerobj->dtos,DesToSrc.c_str(),sizeof(peerobj->dtos));
-				mappeer = peerobj;
-			}
-			*/
 			//²é¿´¶Ô·½»á»°ÊÇ·ñ½¨Á¢
 			LOG(INFO)<<"to find dest "<<DesToSrc.c_str();
 			peer_info_t *destpeer = get_peer_obj(DesToSrc.c_str());
@@ -301,6 +270,10 @@ void agent_read_cb(struct bufferevent *bev, void *arg)
 				bufferevent_write(mappeer->bev,temp,length);	//ÏìÓ¦
 				bufferevent_write(destpeer->bev,temp,length);	//Í¨Öª¶Ô¶ËÒÑÁ¬½ÓÉÏÏß
 			}
+			else
+			{
+				LOG(DEBUG)<<"dest is not exist dest number is "<<DesToSrc.c_str();
+			}
 		}
 		else
 		{
@@ -309,6 +282,7 @@ void agent_read_cb(struct bufferevent *bev, void *arg)
 			bufferevent_write(bev,temp,length);
 			return;
 		}
+	
 	}
 	else
 	{
@@ -316,42 +290,58 @@ void agent_read_cb(struct bufferevent *bev, void *arg)
 		struct bufferevent *desbev = get_address_obj(bev);
 		if(desbev != NULL)
 		{
-			bufferevent_write(desbev,content,len);
+			evbuffer_add_buffer(desbev->output,bev->input);
+			if(evbuffer_get_length(bev->input) > 0)
+			{
+				evbuffer_add_buffer(desbev->output,bev->input);	//ÔÙ¶ÁÒ»±é
+			}
 		}
 		else
 		{
+			LOG(DEBUG)<<"dest is not on line do not transform data";
 			return;
 		}
 	}
 
 	LOG(INFO)<<"to updat source timer"<<peerobj->stod;
-	//¸üĞÂÔ´¶Ë³¬Ê±¶¨Ê±Æ÷
-	if(event_initialized(&peerobj->timer))		
-		event_del(&peerobj->timer);	
-	event_assign(&peerobj->timer,s_evbase, -1, 0, peer_timeout_cb, (void*)peerobj);	
-	struct timeval tv;	
-	evutil_timerclear(&tv);	
-	tv.tv_sec = PEER_SESSION_TIMEOUT;
-	event_add(&peerobj->timer, &tv);
 
-	LOG(INFO)<<"to updat dest timer"<<peerobj->dtos;
+	//¸üĞÂÔ´¶Ë³¬Ê±¶¨Ê±Æ÷
+	struct timeval newtime;
+    evutil_gettimeofday(&newtime, NULL);
+	if(newtime.tv_sec - peerobj->updatetime > 10)
+	{
+		if(event_initialized(&peerobj->timer))		
+			event_del(&peerobj->timer);	
+		event_assign(&peerobj->timer,s_evbase, -1, 0, peer_timeout_cb, (void*)peerobj);	
+		struct timeval tv;	
+		evutil_timerclear(&tv);	
+		tv.tv_sec = PEER_SESSION_TIMEOUT;
+		event_add(&peerobj->timer, &tv);
+		peerobj->updatetime = newtime.tv_sec;
+	}
 	//¸üĞÂ¶Ô¶Ë³¬Ê±¶¨Ê±Æ÷
 	peer_info_t *despeer = get_peer_obj(peerobj->dtos);
 	if(despeer != NULL)
 	{
-		//¸üĞÂ¶Ô¶ËµÄ³¬Ê±¶¨Ê±Æ÷
-		if(event_initialized(&despeer->timer))		
-			event_del(&despeer->timer);	
-		event_assign(&despeer->timer,s_evbase, -1, 0, peer_timeout_cb, (void*)despeer);	
-		struct timeval tv;	
-		evutil_timerclear(&tv);	
-		tv.tv_sec = PEER_SESSION_TIMEOUT;
-		event_add(&despeer->timer, &tv);
+		LOG(INFO)<<"to updat dest timer "<<peerobj->dtos;
+		if(newtime.tv_sec - despeer->updatetime > 10)
+		{
+			//¸üĞÂ¶Ô¶ËµÄ³¬Ê±¶¨Ê±Æ÷
+			if(event_initialized(&despeer->timer))		
+				event_del(&despeer->timer);	
+			event_assign(&despeer->timer,s_evbase, -1, 0, peer_timeout_cb, (void*)despeer);	
+			struct timeval tv;	
+			evutil_timerclear(&tv);	
+			tv.tv_sec = PEER_SESSION_TIMEOUT;
+			event_add(&despeer->timer, &tv);
+			despeer->updatetime = newtime.tv_sec;
+		}
 	}
 	else
 	{
-		LOG(INFO)<<"to updat dest timer"<<peerobj->dtos<< "not exists";
+		LOG(INFO)<<"dest peer not online "<<peerobj->dtos;
 	}
+
 }
 
 //Á¬½Ó³ö´í»Øµ÷
