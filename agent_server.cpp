@@ -39,7 +39,8 @@
 //https://github.com/easylogging/easyloggingpp/blob/master/README.md
 #define ELPP_DEBUG_ASSERT_FAILURE	//配置文件读取失败终止启动
 #define ELPP_STACKTRACE_ON_CRASH		//可以挪到makefile中去
-#define MAX_LINE    10240	//一次读取的缓冲区消息   
+#define MAX_LINE    2048	//一次读取的缓冲区消息   
+#define HIGH_WATER  4096	//设置读数据的高水位
 
 #include "easylogging++.h"
 INITIALIZE_EASYLOGGINGPP	
@@ -205,111 +206,103 @@ void agent_read_cb(struct bufferevent *bev, void *arg)
 {	
 	//节点对象
 	peer_info_t *peerobj = (peer_info_t *)arg;
-	//读取消息
-	if(evbuffer_find(bev->input,(u_char*)"XXEE",4) != NULL)
+	//判断对话是否已建立如果会话已建立就转发数据
+	struct bufferevent *desbev = get_address_obj(bev);
+	if(desbev != NULL)
 	{
-		int n,len;
-		char content[MAX_LINE+1] = {0,};
-		while (n = bufferevent_read(bev, content, MAX_LINE),n > 0)
-		{ 
-			LOG(DEBUG)<<"content "<<content<<"n ="<<n;
-			content[n] = '\0'; 
-			len = n;
-		}
-		content[len-4] = '\0';
-		Json::Reader 	reader;
-		Json::Value 	requestValue;
-		if(reader.parse(content, requestValue) == false)
-		{
-			char temp[64] = "{\"ErrorNum\": \"400\"}XXEE";    
-			int length = strlen(temp); 
-			bufferevent_write(bev,temp,length);
-			return;
-		}
-		//检查连接包的有效性
-		if((requestValue.isObject())&&(requestValue.isMember("AuthCode")) &&(requestValue.isMember("SrcUuid")) \
-			&&(requestValue.isMember("DestUuid"))&&(requestValue.isMember("SessionId")))
-		{
-			std::string SrcUuid = requestValue["SrcUuid"].asCString();
-			std::string DestUuid = requestValue["DestUuid"].asCString();
-			std::string SessionId = requestValue["SessionId"].asCString();
-			std::string SrcToDes = SrcUuid + "_" + DestUuid + "_" + SessionId;
-			std::string DesToSrc =  DestUuid + "_" + SrcUuid + "_" +SessionId;
-			//检查连接是否存在
-			peer_info_t *mappeer = get_peer_obj(SrcToDes.c_str());
-			if(NULL == mappeer) //如果不存在说明是一条新连接
-			{
-				LOG(INFO)<<"new connect peer "<<peerobj->stod;
-				strncpy(peerobj->stod,SrcToDes.c_str(),sizeof(peerobj->stod));
-				strncpy(peerobj->dtos,DesToSrc.c_str(),sizeof(peerobj->dtos));
-				mappeer = peerobj;
-				insert_peer_obj(SrcToDes.c_str(),mappeer);
-			}
-			else if(mappeer->bev != peerobj->bev) //同一个设备同一个会话id,有两条连接，则关闭新连接
-			{
-				LOG(INFO)<<"different connect use the same id"<<SrcToDes.c_str();
-				//断开新连接
-				bufferevent_free(peerobj->bev);
-				//删除新连接的超时定时器
-				if(event_initialized(&peerobj->timer))		
-					event_del(&peerobj->timer);
-				//释放新连接的内存
-				free(peerobj);
-				peerobj = NULL;
-				return ;
-			}
-			//查看对方会话是否建立
-			LOG(INFO)<<"to find dest "<<DesToSrc.c_str();
-			peer_info_t *destpeer = get_peer_obj(DesToSrc.c_str());
-			if(destpeer != NULL)
-			{
-				insert_address_obj(mappeer->bev,destpeer->bev);
-				insert_address_obj(destpeer->bev,mappeer->bev);
-				char temp[64] = "{\"ErrorNum\": \"200\"}XXEE";    
-				int length = strlen(temp);  
-				bufferevent_write(mappeer->bev,temp,length);	//响应
-				bufferevent_write(destpeer->bev,temp,length);	//通知对端已连接上线
-			}
-			else
-			{
-				LOG(DEBUG)<<"dest is not exist dest number is "<<DesToSrc.c_str();
-			}
-		}
-		else
-		{
-			const char *temp = "bad request";    
-			int length = strlen(temp);  
-			bufferevent_write(bev,temp,length);
-			return;
-		}
-	
+		//透传数据
+		//int ret = evbuffer_add_buffer(desbev->output,bev->input);
+		evutil_socket_t fd = bufferevent_getfd(desbev);
+		evbuffer_write(bev->input,fd);
 	}
 	else
 	{
-		//透传数据
-		struct bufferevent *desbev = get_address_obj(bev);
-		if(desbev != NULL)
+		//会话未建立，检查是否是连接请求
+		if(evbuffer_find(bev->input,(u_char*)"XXEE",4) != NULL)
 		{
-			evbuffer_add_buffer(desbev->output,bev->input);
-			if(evbuffer_get_length(bev->input) > 0)
+			int n,len;
+			char content[MAX_LINE+1] = {0,};
+			while (n = bufferevent_read(bev, content, MAX_LINE),n > 0)
+			{ 
+				LOG(DEBUG)<<"content "<<content<<"n ="<<n;
+				content[n] = '\0'; 
+				len = n;
+			}
+			content[len-4] = '\0';
+			Json::Reader 	reader;
+			Json::Value 	requestValue;
+			if(reader.parse(content, requestValue) == false)
 			{
-				evbuffer_add_buffer(desbev->output,bev->input);	//再读一遍
+				char temp[64] = "{\"ErrorNum\": \"400\"}XXEE";    
+				int length = strlen(temp); 
+				bufferevent_write(bev,temp,length);
+				return;
+			}
+			//检查连接包的有效性
+			if((requestValue.isObject())&&(requestValue.isMember("AuthCode")) &&(requestValue.isMember("SrcUuid")) \
+				&&(requestValue.isMember("DestUuid"))&&(requestValue.isMember("SessionId")))
+			{
+				std::string SrcUuid = requestValue["SrcUuid"].asCString();
+				std::string DestUuid = requestValue["DestUuid"].asCString();
+				std::string SessionId = requestValue["SessionId"].asCString();
+				std::string SrcToDes = SrcUuid + "_" + DestUuid + "_" + SessionId;
+				std::string DesToSrc =  DestUuid + "_" + SrcUuid + "_" +SessionId;
+				//检查连接是否存在
+				peer_info_t *mappeer = get_peer_obj(SrcToDes.c_str());
+				if(NULL == mappeer) //如果不存在说明是一条新连接
+				{
+					LOG(INFO)<<"new connect peer "<<peerobj->stod;
+					strncpy(peerobj->stod,SrcToDes.c_str(),sizeof(peerobj->stod));
+					strncpy(peerobj->dtos,DesToSrc.c_str(),sizeof(peerobj->dtos));
+					mappeer = peerobj;
+					insert_peer_obj(SrcToDes.c_str(),mappeer);
+				}
+				else if(mappeer->bev != peerobj->bev) //同一个设备同一个会话id,有两条连接，则关闭新连接
+				{
+					LOG(INFO)<<"different connect use the same id"<<SrcToDes.c_str();
+					//断开新连接
+					bufferevent_free(peerobj->bev);
+					//删除新连接的超时定时器
+					if(event_initialized(&peerobj->timer))		
+						event_del(&peerobj->timer);
+					//释放新连接的内存
+					free(peerobj);
+					peerobj = NULL;
+					return ;
+				}
+				//查看对方会话是否建立
+				LOG(INFO)<<"to find dest "<<DesToSrc.c_str();
+				peer_info_t *destpeer = get_peer_obj(DesToSrc.c_str());
+				if(destpeer != NULL)
+				{
+					insert_address_obj(mappeer->bev,destpeer->bev);
+					insert_address_obj(destpeer->bev,mappeer->bev);
+					char temp[64] = "{\"ErrorNum\": \"200\"}XXEE";    
+					int length = strlen(temp);  
+					bufferevent_write(mappeer->bev,temp,length);	//响应
+					bufferevent_write(destpeer->bev,temp,length);	//通知对端已连接上线
+				}
+				else
+				{
+					LOG(DEBUG)<<"dest is not exist dest number is "<<DesToSrc.c_str();
+				}
+			}
+			else
+			{
+				const char *temp = "bad request";    
+				int length = strlen(temp);  
+				bufferevent_write(bev,temp,length);
+				return;
 			}
 		}
-		else
-		{
-			LOG(DEBUG)<<"dest is not on line do not transform data";
-			return;
-		}
 	}
-
-	LOG(INFO)<<"to updat source timer"<<peerobj->stod;
 
 	//更新源端超时定时器
 	struct timeval newtime;
     evutil_gettimeofday(&newtime, NULL);
 	if(newtime.tv_sec - peerobj->updatetime > 10)
 	{
+		LOG(INFO)<<"to updat source timer"<<peerobj->stod;
 		if(event_initialized(&peerobj->timer))		
 			event_del(&peerobj->timer);	
 		event_assign(&peerobj->timer,s_evbase, -1, 0, peer_timeout_cb, (void*)peerobj);	
@@ -323,9 +316,9 @@ void agent_read_cb(struct bufferevent *bev, void *arg)
 	peer_info_t *despeer = get_peer_obj(peerobj->dtos);
 	if(despeer != NULL)
 	{
-		LOG(INFO)<<"to updat dest timer "<<peerobj->dtos;
 		if(newtime.tv_sec - despeer->updatetime > 10)
 		{
+			LOG(INFO)<<"to updat dest timer "<<peerobj->dtos;
 			//更新对端的超时定时器
 			if(event_initialized(&despeer->timer))		
 				event_del(&despeer->timer);	
@@ -396,8 +389,9 @@ static void agent_accept_cb(int sockfd, short event_type,void *arg)
 	//创建一个bufferevent事件，绑定s_evbase	
 	struct bufferevent *bev = bufferevent_socket_new(s_evbase,fd,BEV_OPT_CLOSE_ON_FREE); 
 	peerobj->bev = bev;
-	bufferevent_setcb(bev, agent_read_cb, NULL, agent_error_cb, peerobj); //设置回调函数	
-	bufferevent_enable(bev, EV_READ|EV_WRITE|EV_PERSIST); //开启base
+	bufferevent_setwatermark(bev,EV_READ,0,HIGH_WATER);			//设置读的高水位为HIGH_WATER
+	bufferevent_setcb(bev,agent_read_cb, NULL, agent_error_cb,peerobj); //设置回调函数	
+	bufferevent_enable(bev, EV_READ|EV_PERSIST); //开启base
 }
 
 static const char * optstr = "hi:s:a:p:f:c:d:v:t:e:";
