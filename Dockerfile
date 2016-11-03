@@ -10,6 +10,6 @@ RUN chmod 777 /xm_workspace/xmcloud3.0/AgentServer/*
 
 WORKDIR /xm_workspace/xmcloud3.0/AgentServer/
 
-EXPOSE 6608
+EXPOSE 6611
 #ENTRYPOINT ["agent_access"]
 CMD ["./start_agentserver.sh"] 
