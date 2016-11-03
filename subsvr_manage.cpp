@@ -6,6 +6,7 @@
 #include <sstream>
 #include <stdio.h>
 #include <unistd.h>
+#include "match.h"
 #include "subsvr_manage.h"
 #include "agent_server.h"
 
@@ -13,29 +14,36 @@ static uint32_t COMMON_MINUTESECONDES = 360;
 
 static int s_redis_update_count = 0;		
 static int s_redis_exit = 0;
-static int dss_server_port = 6601;
+static int dss_server_port = 6611;
 static int pull_thread_startflag = 0;
 //通过环境变量获取配置
 //和环境变量相关
 static char rediscenter_ip[48] = {0,};
+static char rediscenter_iplist[142] = {0,};
 static const char*  serverarea_name = NULL;
 static const char*  vendor_name = NULL;
-static const char*  server_type = NULL;
+static char s_server_type[64] = {0,};
+
+//设置三个service type 以避免同一台服务器上有多个服务类型
+static char server_type1[16] = {0,};
+static char server_type2[16] = {0,};
+static char server_type3[16] = {0,};
+
 time_t begin_time = 0;
 
 static char  dssaccess_server_ip[48] = {0,};
 
 static int  rediscenter_port = 5141;
 
-static void update_serverinfo_to_redis(redisContext* connect)
+static void update_serverinfo_to_redis(redisContext* connect,std::string server_type)
 {
 	if (connect) 
 	{
 		if (0 == redis_multi(connect)) 
 		{	
 			std::string dssaccess_server_key(
-				KEY_DSSACCESSSERVER_KEY_PREFIX +std::string(dssaccess_server_ip));
-			printf("!!!!!!!!!!!!!!!!%s\n",dssaccess_server_ip);
+				server_type + "_" + std::string(dssaccess_server_ip));
+			std::string key_map(server_type + "Map");
 			std::string dssaccess_server_port;
 			std::string dssaccess_server_status;
 			char tps_run_time[48];
@@ -55,8 +63,7 @@ static void update_serverinfo_to_redis(redisContext* connect)
 			ss << peer_map_size;
 			ss >> dssaccess_server_status;
 
-			int ret = redis_hset(connect,KEY_DSSACCESSSERVER_MAP,
-							dssaccess_server_ip, VALUE_DSSACCESSSERVER_ONLINE);
+			int ret = redis_hset(connect,key_map.c_str(),dssaccess_server_ip, VALUE_DSSACCESSSERVER_ONLINE);
 			
 			ret += redis_hset(connect,dssaccess_server_key.c_str(),
 							FIELD_DSSACCESSSERVER_IP, dssaccess_server_ip);
@@ -108,11 +115,54 @@ static int get_env_param()
 	{
 		vendor_name = "General";
 	}
-	server_type = getenv("ServerType");
-	if(NULL == server_type)
+	const char* temp_type = getenv("ServerType");
+	if(NULL == temp_type)
 	{
-		server_type = "DSS";
+		strcpy(s_server_type,"RpsCmd:RpsVoIP:RpsAV");
 	}
+	else
+	{
+		strcpy(s_server_type,temp_type);
+	}
+	
+	//分离出单个的服务类型	
+	char *temp1 = strstr(s_server_type,":");
+	if(temp1 != NULL)
+	{
+		char *temp = NULL;
+		*temp1 = '\0';
+		strcpy(server_type1,s_server_type);
+		temp = temp1+1;
+		char *temp2 = strstr(temp,":");
+		if(temp2 == NULL)
+		{
+			strcpy(server_type2,temp);
+		}
+		else
+		{
+			*temp2 = '\0';
+			strcpy(server_type2,temp);
+			temp = temp2+1;
+			strcpy(server_type3,temp);
+		}
+	}
+	else
+	{
+		strcpy(server_type1,s_server_type);
+	}	
+	printf("type1 = %s,type2 = %s,type3 = %s\n",server_type1,server_type2,server_type3);
+
+	//从环境变量里面获取iplist
+	const char *tmp_server_iplist = getenv("RedisList");
+	if(tmp_server_iplist != NULL)
+	{
+		strcpy(rediscenter_iplist,tmp_server_iplist);
+	}
+	else
+	{
+		strcpy(rediscenter_iplist,rediscenter_ip);
+	}
+	printf("@@@@@@@@@@rediscenter iplist = %s\n",rediscenter_iplist);
 	return 0;
 }
 
@@ -123,14 +173,29 @@ static void* redis_update_thread(void* arg)
 		redisContext* connect = redis_connect(rediscenter_ip, rediscenter_port);
 		if (connect) 
 		{
-			update_serverinfo_to_redis(connect);
+			//按照不同的服务类型写数据库
+			if(strlen(server_type1) != 0)
+			{
+				std::string server_type = std::string(server_type1);
+				update_serverinfo_to_redis(connect,server_type);
+			}
+			if(strlen(server_type2) != 0)
+			{
+				std::string server_type = std::string(server_type2);
+				update_serverinfo_to_redis(connect,server_type);
+			}
+			if(strlen(server_type3) != 0)
+			{
+				std::string server_type = std::string(server_type3);
+				update_serverinfo_to_redis(connect,server_type);
+			}
+			
 			redisFree(connect);
 			s_redis_update_count++;
 			sleep(COMMON_MINUTESECONDES/2);	
 		}
 		else
 		{
-		//	LOG(ERROR) <<"connect redis ...failed";	
 			if(s_redis_update_count==0)
 				sleep(1);
 			else
@@ -147,7 +212,7 @@ static void* pull_serverinfo_thread(void* arg)
 	pull_thread_startflag = 1;
 	while(1)
 	{
-		ret = refresh_server_info(rediscenter_ip);
+		ret = refresh_server_info(rediscenter_iplist);
 		if(ret < 0)
 		{
 			sleep(90);
@@ -197,14 +262,12 @@ int	start_subsvr_manage(const char *m_server_ip,const char *m_cfgserver_ip)
 	while (((s_redis_update_count <= 0)||(pull_thread_startflag<=0))&&(cost < 20))
 	{
 		printf("wait for redis_update\n");
-	//	LOG(INFO) <<"wait for redis_update";
 		sleep(1);	
 		cost++;	
 	}
 	if(cost >= 20)
 	{
 		printf("wait for redis_update timeout\n");
-		//LOG(ERROR) <<"wait for redis_update timeout";
 		return -1;
 	}
 	

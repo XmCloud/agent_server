@@ -71,12 +71,67 @@ static pthread_mutex_t	s_lock_peer_map;		//互斥保护用的
 static addresscon_map_t s_address_map;
 static pthread_mutex_t	s_lock_address_map;		//互斥保护用的
 
+static char data_center_ip[48] = {0,};		//用来存放数据中心IP的
 
 static char   *  s_server_ip    = NULL;	
 static uint16_t s_server_port    = 6604;	
 
 static evbase_t   * s_evbase  = NULL;
 static event 	  *s_event = NULL;
+
+//获取接收缓冲区的大小
+int getrecv_buffer(int fd)
+{
+	//获取发送缓冲区的大小
+	int rcvbuf_len;
+    int len = sizeof(rcvbuf_len);
+    if( getsockopt(fd, SOL_SOCKET, SO_RCVBUF, (void *)&rcvbuf_len, (socklen_t *)&len ) < 0 ){
+        perror("getsockopt: ");
+        return -1;
+    }
+	return rcvbuf_len;
+}
+//获取发送缓冲区的大小
+int getsend_buffer(int fd)
+{
+	//获取发送缓冲区的大小
+	int sendbuf_len;
+    int len = sizeof(sendbuf_len);
+    if( getsockopt(fd, SOL_SOCKET, SO_SNDBUF, (void *)&sendbuf_len, (socklen_t *)&len ) < 0 ){
+        perror("getsockopt: ");
+        return -1;
+    }
+	return sendbuf_len;
+}
+//设置发送缓冲区的大小
+int setsend_buffer(int fd,int length)
+{
+	int len = sizeof(length);
+	if( setsockopt( fd, SOL_SOCKET, SO_SNDBUF, (void *)&length, len ) < 0 ){
+		perror("setsend_buffer getsockopt: ");
+		return -1;
+	}
+	return 0;
+}
+//设置接收缓冲区的大小
+int setrecv_buffer(int fd,int length)
+{
+	int len = sizeof(length);
+	if( setsockopt( fd, SOL_SOCKET, SO_RCVBUF, (void *)&length, len ) < 0 ){
+		perror("setrecv_buffer getsockopt: ");
+		return -1;
+	}
+	return 0;
+}
+//获取服务器的状态
+int get_server_Status()
+{
+	int length = 0;
+	pthread_mutex_lock(&s_lock_peer_map);
+	length = s_peer_map.size();
+	pthread_mutex_unlock(&s_lock_peer_map);
+	return length;
+}
 
 static peer_info_t * get_peer_obj(const char* session)
 {
@@ -166,6 +221,7 @@ static int free_all_con(peer_info_t *peerinfo)
 {
 	struct bufferevent *desbev = NULL;
 	struct bufferevent *srcbev = peerinfo->bev;
+	LOG(INFO)<<"to free all 111111"<<peerinfo->stod;
 	//关闭源端资源
 	erase_peer_obg(peerinfo->stod);
 	erase_address_obj(srcbev);
@@ -176,6 +232,7 @@ static int free_all_con(peer_info_t *peerinfo)
 	peer_info_t * destinfo = get_peer_obj(peerinfo->dtos);
 	if(destinfo != NULL)
 	{
+		LOG(INFO)<<"to free all 222222"<<peerinfo->dtos;
 		desbev = destinfo->bev;
 		erase_peer_obg(destinfo->stod);
 		erase_address_obj(desbev);
@@ -211,7 +268,6 @@ void agent_read_cb(struct bufferevent *bev, void *arg)
 	if(desbev != NULL)
 	{
 		//透传数据
-		//int ret = evbuffer_add_buffer(desbev->output,bev->input);
 		evutil_socket_t fd = bufferevent_getfd(desbev);
 		evbuffer_write(bev->input,fd);
 	}
@@ -271,7 +327,7 @@ void agent_read_cb(struct bufferevent *bev, void *arg)
 					return ;
 				}
 				//查看对方会话是否建立
-				LOG(INFO)<<"to find dest "<<DesToSrc.c_str();
+				
 				peer_info_t *destpeer = get_peer_obj(DesToSrc.c_str());
 				if(destpeer != NULL)
 				{
@@ -281,10 +337,7 @@ void agent_read_cb(struct bufferevent *bev, void *arg)
 					int length = strlen(temp);  
 					bufferevent_write(mappeer->bev,temp,length);	//响应
 					bufferevent_write(destpeer->bev,temp,length);	//通知对端已连接上线
-				}
-				else
-				{
-					LOG(DEBUG)<<"dest is not exist dest number is "<<DesToSrc.c_str();
+					LOG(INFO)<<"create connect session sucess src: "<<SrcUuid.c_str()<<" dest: "<<DestUuid.c_str()<<" sessionid: "<<SessionId.c_str();
 				}
 			}
 			else
@@ -302,7 +355,6 @@ void agent_read_cb(struct bufferevent *bev, void *arg)
     evutil_gettimeofday(&newtime, NULL);
 	if(newtime.tv_sec - peerobj->updatetime > 10)
 	{
-		LOG(INFO)<<"to updat source timer"<<peerobj->stod;
 		if(event_initialized(&peerobj->timer))		
 			event_del(&peerobj->timer);	
 		event_assign(&peerobj->timer,s_evbase, -1, 0, peer_timeout_cb, (void*)peerobj);	
@@ -318,7 +370,6 @@ void agent_read_cb(struct bufferevent *bev, void *arg)
 	{
 		if(newtime.tv_sec - despeer->updatetime > 10)
 		{
-			LOG(INFO)<<"to updat dest timer "<<peerobj->dtos;
 			//更新对端的超时定时器
 			if(event_initialized(&despeer->timer))		
 				event_del(&despeer->timer);	
@@ -345,9 +396,7 @@ void agent_error_cb(struct bufferevent *bev, short event, void *arg)
 	{
 		LOG(ERROR)<<"connect error peer is null";
 		return ;
-	}
-	evutil_socket_t fd = bufferevent_getfd(bev);    
-	printf("fd = %u, ", fd);    
+	}   
 	if (event & BEV_EVENT_TIMEOUT) {        
 		LOG(ERROR)<<"Timed out "<<peerinfo->stod; //if bufferevent_set_timeouts() called    
 	}
@@ -372,7 +421,12 @@ static void agent_accept_cb(int sockfd, short event_type,void *arg)
 		return;
 	}
 	LOG(INFO)<<"ACCEPT: fd = "<<fd;	
-
+	/*
+	int rec_len = getrecv_buffer(fd);
+	LOG(DEBUG)<<"###############rec_len = "<<rec_len;
+	int send_len = getsend_buffer(fd);
+	LOG(DEBUG)<<"###############send_len = "<<send_len;
+	*/
 	//创建一个节点信息
 	peer_info_t *peerobj = (peer_info_t *)calloc(sizeof(peer_info_t),1);
 	assert(peerobj);
@@ -494,6 +548,10 @@ int main(int argc, char ** argv)
 
 	LOG(INFO) << "process has been started current version is "<< VERSION;
 	LOG(INFO) << "server_ip=["<<s_server_ip<<"],server_port=["<<s_server_port<<"]";
+
+	//获取数据中心地址
+	get_param(data_center_ip);
+	start_subsvr_manage(s_server_ip,data_center_ip);
 	
 	//清零全局map表
 	s_address_map.clear();	//地址表
@@ -510,7 +568,7 @@ int main(int argc, char ** argv)
 	set_socket_nonbloc(listen_fd);
 	struct sockaddr_in address;
 	address.sin_family = AF_INET;
-	address.sin_port = htons(6609);
+	address.sin_port = htons(6611);
 	address.sin_addr.s_addr = inet_addr("0.0.0.0");
 	if(bind(listen_fd,(const struct sockaddr *)&address,sizeof(address)) == -1){
 		LOG(ERROR)<<"bind failed";
@@ -521,6 +579,13 @@ int main(int argc, char ** argv)
 		LOG(ERROR)<<"listen failed";
 		return -1;
 	}
+	
+//	int rec_len = getrecv_buffer(listen_fd);
+	setrecv_buffer(listen_fd,20000);
+	int send_len = getsend_buffer(listen_fd);
+	if(send_len < 50000*2)
+		setsend_buffer(listen_fd,50000);
+	
 	LOG(INFO)<<"listening ......";
 	s_evbase  = event_base_new();
 	s_event = event_new(s_evbase,listen_fd,EV_READ|EV_PERSIST,agent_accept_cb,NULL);

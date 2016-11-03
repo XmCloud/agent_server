@@ -10,9 +10,9 @@
 #define __REDIS_DEFINE_H__
 
 // Dssaccess相关信息
-#define KEY_DSSACCESSSERVER_MAP                ("DSSMap")
+//#define KEY_DSSACCESSSERVER_MAP                ("DSSMap")
 
-#define KEY_DSSACCESSSERVER_KEY_PREFIX ("DSS_")
+//#define KEY_DSSACCESSSERVER_KEY_PREFIX ("DSS_")
 
 #define FIELD_DSSACCESSSERVER_IP                  ("ServerIP")
 #define FIELD_DSSACCESSSERVER_PORT                ("ServerPort")
