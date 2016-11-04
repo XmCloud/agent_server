@@ -5,12 +5,12 @@
 #下面的信息要根据实际情况来修改
 progam_name='agent_server'
 serve_ip='127.0.0.1'
-serve_port='6609'
+serve_port='6611'
 #status_redis_addr='redis4status-dss.secu100.net'
-status_redis_addr='127.0.0.1'
-status_redis_port='5131'
-auth_redis_addr='redis4auth-dss.secu100.net'
-auth_redis_port='5111'
+status_redis_addr='redis4status-rps.secu100.net'
+status_redis_port='5126'
+auth_redis_addr='redis4auth-rps.secu100.net'
+auth_redis_port='5116'
 #cfg_redis_addr='redis4cfg.secu100.net'
 
 interval_time='120'
@@ -62,11 +62,11 @@ if [[ ${pnum} > 0 ]]; then
     done
 	#	echo -e "\033[31;40mPid: `pidof ${progam_name}` - startd\033[31;0m"
     echo "11111111111111111111111ddddd"
-    ./${progam_name} -i ${serve_ip} -s ${serve_port} -t ${interval_time} &
+    ./${progam_name} -i ${serve_ip} -s ${serve_port} -t ${interval_time} 
 else
    #	echo -e "\033[31;40mPid: `pidof ${progam_name}` - startd\033[31;0m"
     echo "222222222ddddddddddddd"
-    ./${progam_name} -i ${serve_ip} -s ${serve_port} -t ${interval_time} &
+    ./${progam_name} -i ${serve_ip} -s ${serve_port} -t ${interval_time} 
 fi
 
 exit 0
