@@ -175,7 +175,7 @@ static int	insert_peer_obj(const char* srctodes, peer_info_t *peerinfo)
 		return -1;
 	}
 	
-	LOG(DEBUG)<<"to insert the new peer" << srctodes;
+	//LOG(DEBUG)<<"to insert the new peer" << srctodes;
 	pthread_mutex_lock(&s_lock_peer_map);
 	s_peer_map.insert(peercon_map_t::value_type(srctodes,peerinfo));
 	pthread_mutex_unlock(&s_lock_peer_map);
@@ -188,7 +188,7 @@ static int	insert_address_obj(struct bufferevent * srcbev,struct bufferevent *de
 	{
 		return -1;
 	}
-	LOG(DEBUG)<<"insert_address_obj to insert the new peer";
+	//LOG(DEBUG)<<"insert_address_obj to insert the new peer";
 	pthread_mutex_lock(&s_lock_address_map);
 	s_address_map.insert(addresscon_map_t::value_type(srcbev,desbev));
 	pthread_mutex_unlock(&s_lock_address_map);
@@ -197,7 +197,7 @@ static int	insert_address_obj(struct bufferevent * srcbev,struct bufferevent *de
 
 static int	erase_peer_obg(const char *srctodes)
 {
-	LOG(DEBUG)<<"erase_peer_obg "<<srctodes;
+	//LOG(DEBUG)<<"erase_peer_obg "<<srctodes;
 	pthread_mutex_lock(&s_lock_peer_map);
 	s_peer_map.erase(srctodes);
 	pthread_mutex_unlock(&s_lock_peer_map);
@@ -206,7 +206,6 @@ static int	erase_peer_obg(const char *srctodes)
 
 static int erase_address_obj(struct bufferevent *srcbev)
 {
-	LOG(DEBUG)<<"erase address";
 	if(NULL == srcbev)
 	{
 		return -1;
@@ -221,7 +220,7 @@ static int free_all_con(peer_info_t *peerinfo)
 {
 	struct bufferevent *desbev = NULL;
 	struct bufferevent *srcbev = peerinfo->bev;
-	LOG(INFO)<<"to free all 111111"<<peerinfo->stod;
+	//LOG(INFO)<<"to free all 111111"<<peerinfo->stod;
 	//关闭源端资源
 	erase_peer_obg(peerinfo->stod);
 	erase_address_obj(srcbev);
@@ -232,7 +231,7 @@ static int free_all_con(peer_info_t *peerinfo)
 	peer_info_t * destinfo = get_peer_obj(peerinfo->dtos);
 	if(destinfo != NULL)
 	{
-		LOG(INFO)<<"to free all 222222"<<peerinfo->dtos;
+		//LOG(INFO)<<"to free all 222222"<<peerinfo->dtos;
 		desbev = destinfo->bev;
 		erase_peer_obg(destinfo->stod);
 		erase_address_obj(desbev);
@@ -307,11 +306,11 @@ void agent_read_cb(struct bufferevent *bev, void *arg)
 				peer_info_t *mappeer = get_peer_obj(SrcToDes.c_str());
 				if(NULL == mappeer) //如果不存在说明是一条新连接
 				{
-					LOG(INFO)<<"new connect peer "<<peerobj->stod;
 					strncpy(peerobj->stod,SrcToDes.c_str(),sizeof(peerobj->stod));
 					strncpy(peerobj->dtos,DesToSrc.c_str(),sizeof(peerobj->dtos));
 					mappeer = peerobj;
 					insert_peer_obj(SrcToDes.c_str(),mappeer);
+					LOG(INFO)<<"new connect peer "<<SrcUuid.c_str();
 				}
 				else if(mappeer->bev != peerobj->bev) //同一个设备同一个会话id,有两条连接，则关闭新连接
 				{
@@ -338,6 +337,10 @@ void agent_read_cb(struct bufferevent *bev, void *arg)
 					bufferevent_write(mappeer->bev,temp,length);	//响应
 					bufferevent_write(destpeer->bev,temp,length);	//通知对端已连接上线
 					LOG(INFO)<<"create connect session sucess src: "<<SrcUuid.c_str()<<" dest: "<<DestUuid.c_str()<<" sessionid: "<<SessionId.c_str();
+				}
+				else
+				{
+					LOG(INFO)<<"sernumber: "<<SrcUuid.c_str()<<"online"<<"  destnumber: "<<DestUuid.c_str()<<" not one line";
 				}
 			}
 			else
@@ -420,7 +423,7 @@ static void agent_accept_cb(int sockfd, short event_type,void *arg)
 		printf("ERROR: accept: ");	
 		return;
 	}
-	LOG(INFO)<<"ACCEPT: fd = "<<fd;	
+	//LOG(INFO)<<"ACCEPT: fd = "<<fd;	
 	/*
 	int rec_len = getrecv_buffer(fd);
 	LOG(DEBUG)<<"###############rec_len = "<<rec_len;
