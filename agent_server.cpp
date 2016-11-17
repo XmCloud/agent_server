@@ -39,7 +39,7 @@
 //https://github.com/easylogging/easyloggingpp/blob/master/README.md
 #define ELPP_DEBUG_ASSERT_FAILURE	//配置文件读取失败终止启动
 #define ELPP_STACKTRACE_ON_CRASH		//可以挪到makefile中去
-#define MAX_LINE    2048	//一次读取的缓冲区消息   
+#define MAX_LINE    1024	//一次读取的缓冲区消息   
 #define HIGH_WATER  4096	//设置读数据的高水位
 
 #include "easylogging++.h"
@@ -57,6 +57,7 @@ typedef struct peer_info{
 	uint32_t updatetime;
 	struct event timer;
 }peer_info_t;
+
 //单向连接信息映射表
 typedef std::map<std::string,peer_info_t *> peercon_map_t;
 //双向连接信息映射表
@@ -131,6 +132,33 @@ int get_server_Status()
 	length = s_peer_map.size();
 	pthread_mutex_unlock(&s_lock_peer_map);
 	return length;
+}
+
+int set_socket_reuse(int sockfd)
+{	
+	int one = 1;
+	if(sockfd < 0){
+		LOG(ERROR)<<"sockfd is unavailable" <<sockfd;
+		return -1;
+	}
+	return setsockopt(sockfd,SOL_SOCKET,SO_REUSEADDR,(void *)&one,sizeof(one));
+}
+
+//设置fd非阻塞
+int set_socket_nonbloc(int sockfd)
+{
+	int flag = -1;
+	if(sockfd < 0){
+		LOG(ERROR)<<"set_socket_nonbloc sockfd is unavailable" <<sockfd;
+		return -1;
+	}
+	if((flag = fcntl(sockfd,F_GETFL,NULL)) < 0){
+		return -1;
+	}
+	if(fcntl(sockfd,F_SETFL,flag|O_NONBLOCK) < 0){
+		return -1;
+	}
+	return 0;
 }
 
 static peer_info_t * get_peer_obj(const char* session)
@@ -220,7 +248,7 @@ static int free_all_con(peer_info_t *peerinfo)
 {
 	struct bufferevent *desbev = NULL;
 	struct bufferevent *srcbev = peerinfo->bev;
-	//LOG(INFO)<<"to free all 111111"<<peerinfo->stod;
+	LOG(DEBUG)<<"to free all 111111"<<peerinfo->stod;
 	//关闭源端资源
 	erase_peer_obg(peerinfo->stod);
 	erase_address_obj(srcbev);
@@ -231,7 +259,7 @@ static int free_all_con(peer_info_t *peerinfo)
 	peer_info_t * destinfo = get_peer_obj(peerinfo->dtos);
 	if(destinfo != NULL)
 	{
-		//LOG(INFO)<<"to free all 222222"<<peerinfo->dtos;
+		LOG(DEBUG)<<"to free all 222222"<<peerinfo->dtos;
 		desbev = destinfo->bev;
 		erase_peer_obg(destinfo->stod);
 		erase_address_obj(desbev);
@@ -279,7 +307,7 @@ void agent_read_cb(struct bufferevent *bev, void *arg)
 			char content[MAX_LINE+1] = {0,};
 			while (n = bufferevent_read(bev, content, MAX_LINE),n > 0)
 			{ 
-				LOG(DEBUG)<<"content "<<content<<"n ="<<n;
+				LOG(DEBUG)<<"content "<<content<<" n = "<<n;
 				content[n] = '\0'; 
 				len = n;
 			}
@@ -326,7 +354,6 @@ void agent_read_cb(struct bufferevent *bev, void *arg)
 					return ;
 				}
 				//查看对方会话是否建立
-				
 				peer_info_t *destpeer = get_peer_obj(DesToSrc.c_str());
 				if(destpeer != NULL)
 				{
@@ -388,7 +415,6 @@ void agent_read_cb(struct bufferevent *bev, void *arg)
 	{
 		LOG(INFO)<<"dest peer not online "<<peerobj->dtos;
 	}
-
 }
 
 //连接出错回调
@@ -423,13 +449,8 @@ static void agent_accept_cb(int sockfd, short event_type,void *arg)
 		printf("ERROR: accept: ");	
 		return;
 	}
-	//LOG(INFO)<<"ACCEPT: fd = "<<fd;	
-	/*
-	int rec_len = getrecv_buffer(fd);
-	LOG(DEBUG)<<"###############rec_len = "<<rec_len;
-	int send_len = getsend_buffer(fd);
-	LOG(DEBUG)<<"###############send_len = "<<send_len;
-	*/
+	set_socket_nonbloc(fd);
+	LOG(DEBUG)<<"####accept fd = "<<fd;
 	//创建一个节点信息
 	peer_info_t *peerobj = (peer_info_t *)calloc(sizeof(peer_info_t),1);
 	assert(peerobj);
@@ -441,12 +462,12 @@ static void agent_accept_cb(int sockfd, short event_type,void *arg)
 	struct timeval tv;	
 	evutil_timerclear(&tv);	
 	tv.tv_sec = PEER_SESSION_TIMEOUT;
-	event_add(&peerobj->timer, &tv);
+	event_add(&peerobj->timer, &tv); 
 
 	//创建一个bufferevent事件，绑定s_evbase	
 	struct bufferevent *bev = bufferevent_socket_new(s_evbase,fd,BEV_OPT_CLOSE_ON_FREE); 
 	peerobj->bev = bev;
-	bufferevent_setwatermark(bev,EV_READ,0,HIGH_WATER);			//设置读的高水位为HIGH_WATER
+//	bufferevent_setwatermark(bev,EV_READ,0,HIGH_WATER);			//设置读的高水位为HIGH_WATER
 	bufferevent_setcb(bev,agent_read_cb, NULL, agent_error_cb,peerobj); //设置回调函数	
 	bufferevent_enable(bev, EV_READ|EV_PERSIST); //开启base
 }
@@ -500,32 +521,6 @@ void rolloutHandler(const char* filename, std::size_t size)
 	std::stringstream ss;
 	ss << "mv " << filename << " ./logs-backup/log-backup-" << ++idx;
 	system(ss.str().c_str());
-}
-
-int set_socket_reuse(int sockfd)
-{	
-	int one = 1;
-	if(sockfd < 0){
-		LOG(ERROR)<<"sockfd is unavailable" <<sockfd;
-		return -1;
-	}
-	return setsockopt(sockfd,SOL_SOCKET,SO_REUSEADDR,(void *)&one,sizeof(one));
-}
-
-int set_socket_nonbloc(int sockfd)
-{
-	int flag = -1;
-	if(sockfd < 0){
-		LOG(ERROR)<<"set_socket_nonbloc sockfd is unavailable" <<sockfd;
-		return -1;
-	}
-	if((flag = fcntl(sockfd,F_GETFL,NULL)) < 0){
-		return -1;
-	}
-	if(fcntl(sockfd,F_SETFL,flag|O_NONBLOCK) < 0){
-		return -1;
-	}
-	return 0;
 }
 
 int main(int argc, char ** argv) 
@@ -583,7 +578,6 @@ int main(int argc, char ** argv)
 		return -1;
 	}
 	
-//	int rec_len = getrecv_buffer(listen_fd);
 	setrecv_buffer(listen_fd,30000);
 	int send_len = getsend_buffer(listen_fd);
 	if(send_len < 50000*2)
