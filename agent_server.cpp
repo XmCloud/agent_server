@@ -444,6 +444,8 @@ static void agent_accept_cb(int sockfd, short event_type,void *arg)
 	int fd;	
 	struct sockaddr_in sin;	
 	socklen_t slen;	
+	slen = sizeof(sin);
+	LOG(DEBUG)<<"####accept listen socket fd = "<<sockfd;
 	fd = accept(sockfd, (struct sockaddr *)&sin, &slen);	
 	if (fd < 0){
 		printf("ERROR: accept: ");	
@@ -572,6 +574,7 @@ int main(int argc, char ** argv)
 		LOG(ERROR)<<"bind failed";
 		return -1;
 	}
+	
 	if(listen(listen_fd,8192) == -1)
 	{
 		LOG(ERROR)<<"listen failed";
