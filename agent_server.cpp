@@ -581,7 +581,7 @@ int main(int argc, char ** argv)
 		return -1;
 	}
 	
-	setrecv_buffer(listen_fd,30000);
+	setrecv_buffer(listen_fd,20000);
 	int send_len = getsend_buffer(listen_fd);
 	if(send_len < 50000*2)
 		setsend_buffer(listen_fd,50000);
