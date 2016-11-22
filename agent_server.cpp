@@ -285,6 +285,24 @@ static void peer_timeout_cb(evutil_socket_t fd, short event, void *arg)
 	return;
 }
 
+/*  
+	agent_write_cb:
+	如果发送缓冲区域为空但是接收缓冲区还有数据agent_write_cb就被回调把数
+	据发出去而不必等待下一次触发agent_read_cb 用来减小延时提高效率
+*/
+void agent_write_cb(struct bufferevent *bev, void *arg) 
+{
+	peer_info_t *peerobj = (peer_info_t *)arg;
+	//判断对话是否已建立如果会话已建立就转发数据
+	size_t input_len =  evbuffer_get_length(bev->input);
+	struct bufferevent *desbev = get_address_obj(bev);
+	if((desbev != NULL)&&(input_len > 0))
+	{
+		//透传数据
+		bufferevent_write_buffer(desbev, bev->input);
+	}
+	return;
+}
 
 void agent_read_cb(struct bufferevent *bev, void *arg) 
 {	
@@ -295,8 +313,9 @@ void agent_read_cb(struct bufferevent *bev, void *arg)
 	if(desbev != NULL)
 	{
 		//透传数据
-		evutil_socket_t fd = bufferevent_getfd(desbev);
-		evbuffer_write(bev->input,fd);
+		//	evutil_socket_t fd = bufferevent_getfd(desbev);
+		//	evbuffer_write(bev->input,fd);
+		bufferevent_write_buffer(desbev, bev->input);
 	}
 	else
 	{
@@ -469,9 +488,9 @@ static void agent_accept_cb(int sockfd, short event_type,void *arg)
 	//创建一个bufferevent事件，绑定s_evbase	
 	struct bufferevent *bev = bufferevent_socket_new(s_evbase,fd,BEV_OPT_CLOSE_ON_FREE); 
 	peerobj->bev = bev;
-//	bufferevent_setwatermark(bev,EV_READ,0,HIGH_WATER);			//设置读的高水位为HIGH_WATER
-	bufferevent_setcb(bev,agent_read_cb, NULL, agent_error_cb,peerobj); //设置回调函数	
-	bufferevent_enable(bev, EV_READ|EV_PERSIST); //开启base
+	bufferevent_setwatermark(bev,EV_READ,0,HIGH_WATER);			//设置读的高水位为HIGH_WATER
+	bufferevent_setcb(bev,agent_read_cb, agent_write_cb, agent_error_cb,peerobj); //设置回调函数	
+	bufferevent_enable(bev, EV_READ|EV_WRITE|EV_PERSIST); //开启base
 }
 
 static const char * optstr = "hi:s:a:p:f:c:d:v:t:e:";
