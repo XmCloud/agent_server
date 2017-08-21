@@ -210,9 +210,31 @@ static void* pull_serverinfo_thread(void* arg)
 	//定期拉取服务信息
 	int ret = 0;
 	pull_thread_startflag = 1;
+	std::string rps_type;
+	rps_type.clear();
+	
+	if(strlen(server_type1) != 0)
+	{
+		std::string server_type = std::string(server_type1);
+		rps_type = server_type;
+	}
+	
+	if(strlen(server_type2) != 0)
+	{
+		std::string server_type = std::string(server_type2);
+		rps_type = rps_type + "_" + server_type;
+	}
+	
+	if(strlen(server_type3) != 0)
+	{
+		std::string server_type = std::string(server_type3);
+		rps_type = rps_type + "_" + server_type;
+	}
+	
+	printf("rps type:%s\n",rps_type.c_str());
 	while(1)
 	{
-		ret = refresh_server_info(rediscenter_iplist);
+		ret = refresh_server_info(rediscenter_iplist,(char *)rps_type.c_str());
 		if(ret < 0)
 		{
 			sleep(90);

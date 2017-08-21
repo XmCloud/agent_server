@@ -292,7 +292,6 @@ static void peer_timeout_cb(evutil_socket_t fd, short event, void *arg)
 */
 void agent_write_cb(struct bufferevent *bev, void *arg) 
 {
-	peer_info_t *peerobj = (peer_info_t *)arg;
 	//判断对话是否已建立如果会话已建立就转发数据
 	size_t input_len =  evbuffer_get_length(bev->input);
 	struct bufferevent *desbev = get_address_obj(bev);
@@ -322,7 +321,7 @@ void agent_read_cb(struct bufferevent *bev, void *arg)
 		//会话未建立，检查是否是连接请求
 		if(evbuffer_find(bev->input,(u_char*)"XXEE",4) != NULL)
 		{
-			int n,len;
+			int n = 0,len = 0;
 			char content[MAX_LINE+1] = {0,};
 			while (n = bufferevent_read(bev, content, MAX_LINE),n > 0)
 			{ 
