@@ -52,6 +52,7 @@ function gethostip()
 	fi
 }
 
+shell_pid=$(ps -ef|grep "start_agentserver.sh"|grep -v grep|awk '{print $2;exit}')
 echo "------------ ${progam_name} ${serve_ip} ${serve_port} ${status_redis_addr} ${status_redis_port} ${interval_time}---------"
 pnum=`ps -ef|grep "./${progam_name}"|grep -v grep|awk 'END{print NR}'`
 if [[ ${pnum} > 0 ]]; then
@@ -69,5 +70,6 @@ else
     ./${progam_name} -i ${serve_ip} -s ${serve_port} -t ${interval_time} 
 fi
 
+kill -9 ${shell_pid}
 exit 0
 
